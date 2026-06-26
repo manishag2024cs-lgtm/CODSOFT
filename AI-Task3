@@ -1,0 +1,62 @@
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.applications import VGG16
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, LSTM, Embedding, Dense, Dropout
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.utils import pad_sequences
+
+# Load VGG16 model
+base_model = VGG16(weights='imagenet')
+model = Model(inputs=base_model.input, outputs=base_model.get_layer('fc2').output)
+
+# Function to extract features from an image
+def extract_features(filename):
+    image = load_img(filename, target_size=(224, 224))
+    image = img_to_array(image)
+    image = np.expand_dims(image, axis=0)
+    image = tf.keras.applications.vgg16.preprocess_input(image)
+    features = model.predict(image)
+    return features
+
+# Load and preprocess captions
+def load_captions(captions_file):
+    with open(captions_file, 'r') as file:
+        captions = file.readlines()
+    return [caption.strip() for caption in captions]
+
+# Tokenize captions
+captions = load_captions('captions.txt')
+tokenizer = Tokenizer()
+tokenizer.fit_on_texts(captions)
+vocab_size = len(tokenizer.word_index) + 1
+
+# Prepare sequences
+sequences = []
+for caption in captions:
+    sequence = tokenizer.texts_to_sequences([caption])[0]
+    for i in range(1, len(sequence)):
+        seq = sequence[:i+1]
+        sequences.append(seq)
+
+max_length = max(len(seq) for seq in sequences)
+sequences = pad_sequences(sequences, maxlen=max_length, padding='post')
+
+# Split into input and output
+X, y = sequences[:, :-1], sequences[:, -1]
+y = tf.keras.utils.to_categorical(y, num_classes=vocab_size)
+
+# Define the model
+input1 = Input(shape=(4096,))
+input2 = Input(shape=(max_length-1,))
+embedding = Embedding(vocab_size, 256)(input2)
+lstm = LSTM(256)(embedding)
+merge = tf.keras.layers.add([input1, lstm])
+output = Dense(vocab_size, activation='softmax')(merge)
+
+model = tf.keras.models.Model(inputs=[input1, input2], outputs=output)
+model.compile(loss='categorical_crossentropy', optimizer='adam')
+
+# Train the model
+# model.fit([features, X], y, epochs=20, verbose=2)
